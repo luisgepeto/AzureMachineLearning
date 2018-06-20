@@ -15,7 +15,8 @@ namespace CallRequestResponseService
     {
         public static string apiKey = "yourapikeyhere";
         public static string baseUri = "yoururihere";
-
+        public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>(){{"1", "Good Credit"},{"2", "Bad Credit"}};
+        
         public static void Main(string[] args)
         {
             var answers = AnswerQuestions();
@@ -35,7 +36,7 @@ namespace CallRequestResponseService
                 {
                     Inputs = new
                     {
-                        Input1 = new InputDetail()
+                        Input1 = new Detail()
                         {
                             ColumnNames = columnNames,
                             Values = new List<List<string>>(){
@@ -43,16 +44,23 @@ namespace CallRequestResponseService
                             }
                         }
                     }
-                };
-                Console.WriteLine(JsonConvert.SerializeObject(scoreRequest));
+                };                
                 var response = await client.PostAsJsonAsync("", scoreRequest);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine("Result: {0}", result);
+                    var definition = new { Results = new { Output1 = new { Value = new Detail()}}};
+                    var parsedResponse = JsonConvert.DeserializeAnonymousType(result, definition);
+                    var scoredLabelsIndex = parsedResponse.Results.Output1.Value.ColumnNames.IndexOf("Scored Labels");
+                    var scoredProbabilitiesIndex = parsedResponse.Results.Output1.Value.ColumnNames.IndexOf("Scored Probabilities");
+                    var scoredLabelResult = parsedResponse.Results.Output1.Value.Values.ElementAt(0).ElementAt(scoredLabelsIndex);
+                    var scoredProbabilityResult = parsedResponse.Results.Output1.Value.Values.ElementAt(0).ElementAt(scoredProbabilitiesIndex);
+
+                    Console.WriteLine("Credit Risk Classification: {0}", CreditRiskDictionary[scoredLabelResult]);
+                    Console.WriteLine("Probability of risk: {0}", (double.Parse(scoredProbabilityResult)*100).ToString("0.##"));
                 }
                 else
-                {
+                {                    
                     Console.WriteLine(string.Format("The request failed with status code: {0}", response.StatusCode));
                     Console.WriteLine(response.Headers.ToString());
                     var responseContent = await response.Content.ReadAsStringAsync();
@@ -198,8 +206,8 @@ namespace CallRequestResponseService
         }
         
     }
-
-    public class InputDetail
+    
+    public class Detail
     {
         public List<string> ColumnNames { get; set; }
         public List<List<string>> Values { get; set; }
