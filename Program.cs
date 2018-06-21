@@ -13,8 +13,8 @@ namespace CallRequestResponseService
 {
     public class Program
     {
-        public static string apiKey = "2evyAw9FK2GbQrBXOe47SX/ZSBssGR4g9Ix7KMm3CvvFUpeUmO9LFgb7/C7d8EyQZcpzf2UO3rov8rZolDty4w==";
-        public static string baseUri = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/605936757fbe4ce4ae37eb8c799b2b74/execute?api-version=2.0&details=true";
+        public static string apiKey = "yourapikeyhere";
+        public static string baseUri = "yoururihere";
         public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>(){{"1", "Good Credit"},{"2", "Bad Credit"}};
         public static void Main(string[] args)
         {
