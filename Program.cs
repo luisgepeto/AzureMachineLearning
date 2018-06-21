@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using CsvHelper;
 
 namespace CallRequestResponseService
 {
@@ -15,22 +16,47 @@ namespace CallRequestResponseService
     {
         public static string apiKey = "yourapikeyhere";
         public static string baseUri = "yoururihere";
-        public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>(){{"1", "Good Credit"},{"2", "Bad Credit"}};
+        public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>() { { "1", "Good Credit" }, { "2", "Bad Credit" } };
+
         public static void Main(string[] args)
         {
-            var answers = AnswerQuestions();
-            InvokeRequestResponseService(answers).Wait();
+            if (args.ElementAtOrDefault(0) == "csv")
+            {
+                if(!int.TryParse(args.ElementAtOrDefault(1), out var numberOfRecords)) numberOfRecords = 1000;
+                var csv = new CsvReader(File.OpenText(@".\data\german.data.csv"));                
+                var recordCount = 0;
+                while (csv.Read() && recordCount < numberOfRecords)
+                {
+                    var answers = new List<string>();
+                    for(int i =0; i < 20; i++)
+                    {
+                        answers.Add(csv.GetField(i));                        
+                    }
+                    recordCount++;
+                    var answeredQuestions = AnswerQuestions(answers);
+                    var result = InvokeRequestResponseService(answeredQuestions).Result;
+                    Console.WriteLine("Actual credit risk classification: {0}", CreditRiskDictionary[csv.GetField(20)]);
+                    Console.WriteLine("Predicted credit risk classification: {0}", CreditRiskDictionary[result.Item1]);
+                    Console.WriteLine("Probability of risk: {0}", result.Item2);
+                }                
+            }
+            else {
+                var answeredQuestions = AnswerQuestions();
+                var result = InvokeRequestResponseService(answeredQuestions).Result;
+                Console.WriteLine("Predicted credit risk classification: {0}", CreditRiskDictionary[result.Item1]);
+                Console.WriteLine("Probability of risk: {0}", result.Item2);
+            }
         }
 
-        private static async Task InvokeRequestResponseService(List<Attribute> attributes)
+        private static async Task<(string, string)> InvokeRequestResponseService(List<Attribute> attributes)
         {
             using (var client = new HttpClient())
             {
                 client.BaseAddress = new Uri(baseUri);
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);             var columnNames = attributes.Select(a => a.Column).ToList();
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey); var columnNames = attributes.Select(a => a.Column).ToList();
                 columnNames.Add("credit_risk");
-                var goodCreditValues = attributes.Select(a => a.CategoryOptions == null ? a.AnswerIndex.ToString() : a.CategoryOptions.ElementAt(a.AnswerIndex-1).Value).ToList();                
-                goodCreditValues.Add("1");                
+                var goodCreditValues = attributes.Select(a => a.CategoryOptions == null ? a.AnswerIndex.ToString() : a.CategoryOptions.ElementAt(a.AnswerIndex - 1).Value).ToList();
+                goodCreditValues.Add("1");
                 var scoreRequest = new
                 {
                     Inputs = new
@@ -43,32 +69,32 @@ namespace CallRequestResponseService
                             }
                         }
                     }
-                };                
+                };
                 var response = await client.PostAsJsonAsync("", scoreRequest);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
-                    var definition = new { Results = new { Output1 = new { Value = new Detail()}}};
+                    var definition = new { Results = new { Output1 = new { Value = new Detail() } } };
                     var parsedResponse = JsonConvert.DeserializeAnonymousType(result, definition);
                     var scoredLabelsIndex = parsedResponse.Results.Output1.Value.ColumnNames.IndexOf("Scored Labels");
                     var scoredProbabilitiesIndex = parsedResponse.Results.Output1.Value.ColumnNames.IndexOf("Scored Probabilities");
                     var scoredLabelResult = parsedResponse.Results.Output1.Value.Values.ElementAt(0).ElementAt(scoredLabelsIndex);
                     var scoredProbabilityResult = parsedResponse.Results.Output1.Value.Values.ElementAt(0).ElementAt(scoredProbabilitiesIndex);
 
-                    Console.WriteLine("Credit Risk Classification: {0}", CreditRiskDictionary[scoredLabelResult]);
-                    Console.WriteLine("Probability of risk: {0}", (double.Parse(scoredProbabilityResult)*100).ToString("0.##"));
+                    return (scoredLabelResult, (double.Parse(scoredProbabilityResult) * 100).ToString("0.##"));                    
                 }
                 else
-                {                    
+                {
                     Console.WriteLine(string.Format("The request failed with status code: {0}", response.StatusCode));
                     Console.WriteLine(response.Headers.ToString());
                     var responseContent = await response.Content.ReadAsStringAsync();
                     Console.WriteLine(responseContent);
+                    return default((string, string));
                 }
             }
         }
 
-        private static List<Attribute> AnswerQuestions()
+        private static List<Attribute> AnswerQuestions(List<string> answers = null)
         {
             var attributes = new List<Attribute>(){
                 new Attribute("status_checking", "Status of existing checking account"){
@@ -137,7 +163,7 @@ namespace CallRequestResponseService
                     CategoryOptions = new List<CategoryOption>(){
                         new CategoryOption("A101", "(A101) none"),
                         new CategoryOption("A102", "(A102) co-applicant"),
-                        new CategoryOption("A103", "(A103) guarantor")                        
+                        new CategoryOption("A103", "(A103) guarantor")
                     }
                 },
                 new Attribute("residence_since", "Present residence since"),
@@ -154,58 +180,77 @@ namespace CallRequestResponseService
                     CategoryOptions = new List<CategoryOption>(){
                         new CategoryOption("A141", "(A141) bank"),
                         new CategoryOption("A142", "(A142) stores"),
-                        new CategoryOption("A143", "(A143) none")                        
+                        new CategoryOption("A143", "(A143) none")
                     }
                 },
                 new Attribute("housing_status", "Housing"){
                     CategoryOptions = new List<CategoryOption>(){
                         new CategoryOption("A151", "(A151) rent"),
                         new CategoryOption("A152", "(A152) own"),
-                        new CategoryOption("A153", "(A153) for free")                        
+                        new CategoryOption("A153", "(A153) for free")
                     }
                 },
                 new Attribute("num_credits", "Number of existing credits at this bank"),
                 new Attribute("job_type", "Job"){
                     CategoryOptions = new List<CategoryOption>(){
-                        new CategoryOption("A171", "(A171) unemployed/unskilled - non-resident"),                        
-                        new CategoryOption("A172", "(A172) unskilled - resident"),                        
-                        new CategoryOption("A173", "(A173) skilled employee/official"),                        
+                        new CategoryOption("A171", "(A171) unemployed/unskilled - non-resident"),
+                        new CategoryOption("A172", "(A172) unskilled - resident"),
+                        new CategoryOption("A173", "(A173) skilled employee/official"),
                         new CategoryOption("A174", "(A174) management/self-employed/highly qualified employee/officer")
                     }
                 },
                 new Attribute("num_dependant", "Number of people being liable to provide manintenance for"),
                 new Attribute("own_telephone", "Telephone"){
                     CategoryOptions = new List<CategoryOption>(){
-                        new CategoryOption("A191", "(A191) none"),                                                
-                        new CategoryOption("A192", "(A192) yes, registered under the customers name"),                                                
+                        new CategoryOption("A191", "(A191) none"),
+                        new CategoryOption("A192", "(A192) yes, registered under the customers name"),
                     }
                 },
                 new Attribute("foreign_worker", "Foreign worker"){
                     CategoryOptions = new List<CategoryOption>(){
-                        new CategoryOption("A201", "(A201) yes"),                                                
-                        new CategoryOption("A202", "(A202) no"),                                                
+                        new CategoryOption("A201", "(A201) yes"),
+                        new CategoryOption("A202", "(A202) no"),
                     }
                 }
             };
+            var iterator = 0;
             foreach (var attribute in attributes)
             {
-                Console.WriteLine($"{attribute.Name}:");
-                if (attribute.CategoryOptions != null)
-                {
-                    for (var i = 1; i <= attribute.CategoryOptions.Count; i++)
+                var stringAnswer = "";
+                if(answers == null){
+                    Console.WriteLine($"{attribute.Name}:");
+                    if (attribute.CategoryOptions != null)
                     {
-                        Console.WriteLine($"\t{i}: {attribute.CategoryOptions.ElementAt(i - 1).Name} ");
+                        for (var i = 1; i <= attribute.CategoryOptions.Count; i++)
+                        {
+                            Console.WriteLine($"\t{i}: {attribute.CategoryOptions.ElementAt(i - 1).Name} ");
+                        }
                     }
-                }
-                Console.Write("Answer: ");
-                var answer = int.Parse(Console.ReadLine());
-                attribute.AnswerIndex = answer;
+                    Console.Write("Answer: ");
+                    stringAnswer = Console.ReadLine();
+                }   
+                else
+                {
+                    var providedAnswer = answers.ElementAt(iterator);
+                    if(attribute.CategoryOptions != null){
+                        for(int i=0; i< attribute.CategoryOptions.Count; i++){
+                            if(attribute.CategoryOptions.ElementAt(i).Value == providedAnswer){
+                                providedAnswer = (i+1).ToString();
+                                break;
+                            }
+                        }
+                    }
+                    stringAnswer = providedAnswer;                    
+                }                
+
+                attribute.AnswerIndex = int.Parse(stringAnswer);
+                iterator++;
             }
             return attributes;
         }
-        
+
     }
-    
+
     public class Detail
     {
         public List<string> ColumnNames { get; set; }
