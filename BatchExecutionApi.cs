@@ -20,117 +20,99 @@ namespace AzureMachineLearning
 
     public static class BatchExecutionApi
     {
+        public static string StorageConnectionString = $"DefaultEndpointsProtocol=https;AccountName={BatchExecutionApiSettings.StorageAccountName};AccountKey={ BatchExecutionApiSettings.StorageAccountKey}";        
         public static void GetBatchPrediction()
         {
             InvokeBatchExecutionService().Wait();
         }
-
+        
         static async Task InvokeBatchExecutionService()
-        {
-            const string BaseUrl = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/605936757fbe4ce4ae37eb8c799b2b74/jobs";
-
-            const string StorageAccountName = "ipsmachinelearning";
-            const string StorageAccountKey = "";
-            const string StorageContainerName = "ipsmachinelearningcontainer";
-            string storageConnectionString = string.Format("DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1}", StorageAccountName, StorageAccountKey);
-            const string apiKey = "";
-
-            const int TimeOutInMilliseconds = 120 * 1000;
-
-            UploadFileToBlob(@".\data\german.input.csv",StorageContainerName, storageConnectionString);
+        {            
+            UploadFileToBlob();
 
             using (HttpClient client = new HttpClient())
             {
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ConfigurationSettings.ApiKey);
                 var request = new 
                 {
                     Inputs = new
                     {
                         Input1 = new AzureBlobDataReference()
                         {
-                            ConnectionString = storageConnectionString,
-                            RelativeLocation = string.Format("{0}/german.input.csv", StorageContainerName)
+                            ConnectionString = StorageConnectionString,
+                            RelativeLocation = $"{BatchExecutionApiSettings.StorageContainerName}/{Path.GetFileName(ConfigurationSettings.InputFilePath)}"
                         }
                     },
                     Outputs = new
                     {
                         output1 = new AzureBlobDataReference()
                         {
-                            ConnectionString = storageConnectionString,
-                            RelativeLocation = string.Format("/{0}/german.output.csv", StorageContainerName)
+                            ConnectionString = StorageConnectionString,
+                            RelativeLocation = $"{BatchExecutionApiSettings.StorageContainerName}/{Path.GetFileName(BatchExecutionApiSettings.OutputFilePath)}"
                         }
                     }                    
-                };
+                };                
 
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                HttpResponseMessage response = new HttpResponseMessage();
+                try
+                {
+                    Console.WriteLine("Submitting the job...");
+                    response = await client.PostAsJsonAsync(ConfigurationSettings.BaseUrl + "/jobs" + "?api-version=2.0", request);
+                    response.EnsureSuccessStatusCode();
+                    var jobId = await response.Content.ReadAsAsync<string>();
+                    Console.WriteLine(string.Format("Job ID: {0}", jobId));
+                    Console.WriteLine("Starting the job...");
+                    response = await client.PostAsync(ConfigurationSettings.BaseUrl + "/jobs" + "/" + jobId + "/start?api-version=2.0", null);
+                    response.EnsureSuccessStatusCode();
+                    var jobLocation = ConfigurationSettings.BaseUrl + "/jobs" + "/" + jobId + "?api-version=2.0";
+                    var watch = Stopwatch.StartNew();
+                    var done = false;
+                    while (!done)
+                    {
+                        Console.WriteLine("Checking the job status...");
+                        response = await client.GetAsync(jobLocation);
+                        response.EnsureSuccessStatusCode();
 
-                Console.WriteLine("Submitting the job...");
-                var response = await client.PostAsJsonAsync(BaseUrl + "?api-version=2.0", request);
-                if (!response.IsSuccessStatusCode)
+                        var status = await response.Content.ReadAsAsync<BatchScoreStatus>();
+                        if (watch.ElapsedMilliseconds > BatchExecutionApiSettings.TimeOutInMilliseconds)
+                        {
+                            done = true;
+                            Console.WriteLine(string.Format("Timed out. Deleting job {0} ...", jobId));
+                            await client.DeleteAsync(jobLocation);
+                        }
+                        switch (status.StatusCode)
+                        {
+                            case BatchScoreStatusCode.NotStarted:
+                                Console.WriteLine(string.Format("Job {0} not yet started...", jobId));
+                                break;
+                            case BatchScoreStatusCode.Running:
+                                Console.WriteLine(string.Format("Job {0} running...", jobId));
+                                break;
+                            case BatchScoreStatusCode.Failed:
+                                Console.WriteLine(string.Format("Job {0} failed!", jobId));
+                                Console.WriteLine(string.Format("Error details: {0}", status.Details));
+                                done = true;
+                                break;
+                            case BatchScoreStatusCode.Cancelled:
+                                Console.WriteLine(string.Format("Job {0} cancelled!", jobId));
+                                done = true;
+                                break;
+                            case BatchScoreStatusCode.Finished:
+                                done = true;
+                                Console.WriteLine(string.Format("Job {0} finished!", jobId));
+                                SaveBlobToFile(status);                                
+                                break;
+                        }
+                        if (!done)
+                        {
+                            Thread.Sleep(1000);
+                        }
+                    }
+                }
+                catch(Exception)
                 {
                     await WriteFailedResponse(response);
-                    return;
-                }
-
-                string jobId = await response.Content.ReadAsAsync<string>();
-                Console.WriteLine(string.Format("Job ID: {0}", jobId));
-
-
-                Console.WriteLine("Starting the job...");
-                response = await client.PostAsync(BaseUrl + "/" + jobId + "/start?api-version=2.0", null);
-                if (!response.IsSuccessStatusCode)
-                {
-                    await WriteFailedResponse(response);
-                    return;
-                }
-
-                string jobLocation = BaseUrl + "/" + jobId + "?api-version=2.0";
-                Stopwatch watch = Stopwatch.StartNew();
-                bool done = false;
-                while (!done)
-                {
-                    Console.WriteLine("Checking the job status...");
-                    response = await client.GetAsync(jobLocation);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        await WriteFailedResponse(response);
-                        return;
-                    }
-
-                    BatchScoreStatus status = await response.Content.ReadAsAsync<BatchScoreStatus>();
-                    if (watch.ElapsedMilliseconds > TimeOutInMilliseconds)
-                    {
-                        done = true;
-                        Console.WriteLine(string.Format("Timed out. Deleting job {0} ...", jobId));
-                        await client.DeleteAsync(jobLocation);
-                    }
-                    switch (status.StatusCode)
-                    {
-                        case BatchScoreStatusCode.NotStarted:
-                            Console.WriteLine(string.Format("Job {0} not yet started...", jobId));
-                            break;
-                        case BatchScoreStatusCode.Running:
-                            Console.WriteLine(string.Format("Job {0} running...", jobId));
-                            break;
-                        case BatchScoreStatusCode.Failed:
-                            Console.WriteLine(string.Format("Job {0} failed!", jobId));
-                            Console.WriteLine(string.Format("Error details: {0}", status.Details));
-                            done = true;
-                            break;
-                        case BatchScoreStatusCode.Cancelled:
-                            Console.WriteLine(string.Format("Job {0} cancelled!", jobId));
-                            done = true;
-                            break;
-                        case BatchScoreStatusCode.Finished:
-                            done = true;
-                            Console.WriteLine(string.Format("Job {0} finished!", jobId));
-                            SaveBlobToFile(status);
-                            break;
-                    }
-                    if (!done)
-                    {
-                        Thread.Sleep(1000);
-                    }
-                }
+                }   
             }            
         }
 
@@ -139,27 +121,38 @@ namespace AzureMachineLearning
             var blobLocation = status.Results.ElementAt(0).Value;
             var resultsLabel = status.Results.ElementAt(0).Key;
 
-            const string OutputFileLocation = @".\data\german.output.csv";
             var credentials = new StorageCredentials(blobLocation.SasBlobToken);
             var blobUrl = new Uri(new Uri(blobLocation.BaseLocation), blobLocation.RelativeLocation);
             var cloudBlob = new CloudBlockBlob(blobUrl, credentials);
-            cloudBlob.DownloadToFileAsync(OutputFileLocation, FileMode.Create).Wait();
+            cloudBlob.DownloadToFileAsync(BatchExecutionApiSettings.OutputFilePath, FileMode.Create).Wait();
+            CleanDuplicateCsvRows();
         }
 
-        static void UploadFileToBlob(string inputFileLocation, string storageContainerName, string storageConnectionString)
+        static void UploadFileToBlob()
         {
-            var blobClient = CloudStorageAccount.Parse(storageConnectionString).CreateCloudBlobClient();
-            var container = blobClient.GetContainerReference(storageContainerName);
+            var blobClient = CloudStorageAccount.Parse(StorageConnectionString).CreateCloudBlobClient();
+            var container = blobClient.GetContainerReference(BatchExecutionApiSettings.StorageContainerName);
             container.CreateIfNotExistsAsync().Wait();
-            var blob = container.GetBlockBlobReference(Path.GetFileName(inputFileLocation));
-            blob.UploadFromFileAsync(inputFileLocation).Wait();
+            var blob = container.GetBlockBlobReference(Path.GetFileName(ConfigurationSettings.InputFilePath));
+            blob.UploadFromFileAsync(ConfigurationSettings.InputFilePath).Wait();
         }
         private static async Task WriteFailedResponse(HttpResponseMessage response)
         {
             Console.WriteLine(string.Format("The request failed with status code: {0}", response.StatusCode));
             Console.WriteLine(response.Headers.ToString());
-            string responseContent = await response.Content.ReadAsStringAsync();
+            var responseContent = await response.Content.ReadAsStringAsync();
             Console.WriteLine(responseContent);
+        }
+        private static void CleanDuplicateCsvRows()
+        {
+            var lines = File.ReadAllLines(BatchExecutionApiSettings.OutputFilePath).ToList();
+            var uniqueLines = lines.Distinct();
+            File.WriteAllText(BatchExecutionApiSettings.OutputFilePath, string.Empty);
+            using(var tw = new StreamWriter(BatchExecutionApiSettings.OutputFilePath))
+            {
+                foreach (var line in uniqueLines)
+                    tw.WriteLine(line);
+            }
         }
     }
     public class AzureBlobDataReference

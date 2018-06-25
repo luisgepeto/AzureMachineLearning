@@ -17,9 +17,7 @@ namespace AzureMachineLearning
     }
 
     public static class RequestResponseApi
-    {
-        public static string apiKey = "";
-        public static string baseUri = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/605936757fbe4ce4ae37eb8c799b2b74/execute?api-version=2.0&details=true";
+    {        
         public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>() { { "1", "Good Credit" }, { "2", "Bad Credit" } };
         public static void GetMultiplePrediction(int numberOfPredictions)
         {
@@ -51,8 +49,8 @@ namespace AzureMachineLearning
         {
             using (var client = new HttpClient())
             {
-                client.BaseAddress = new Uri(baseUri);
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey); var columnNames = answeredQuestions.Select(a => a.Column).ToList();
+                client.BaseAddress = new Uri(ConfigurationSettings.BaseUrl+"/execute?api-version=2.0&details=true");
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ConfigurationSettings.ApiKey); var columnNames = answeredQuestions.Select(a => a.Column).ToList();
                 columnNames.Add("credit_risk");
                 var goodCreditValues = answeredQuestions.Select(a => a.CategoryOptions == null ? a.AnswerIndex.ToString() : a.CategoryOptions.ElementAt(a.AnswerIndex - 1).Value).ToList();
                 goodCreditValues.Add("1");
