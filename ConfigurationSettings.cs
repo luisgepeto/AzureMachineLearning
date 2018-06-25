@@ -4,7 +4,7 @@ namespace AzureMachineLearning
     {
         public const string InputFilePath= @".\data\german.input.csv";
         public const string ApiKey = "";
-        public const string BaseUrl = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/605936757fbe4ce4ae37eb8c799b2b74";
+        public const string BaseUrl = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/ac5f066fd0b74a10aec68b54d8fc59fe";
     }
     public static class BatchExecutionApiSettings
     {
