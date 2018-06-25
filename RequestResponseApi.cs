@@ -18,13 +18,14 @@ namespace AzureMachineLearning
 
     public static class RequestResponseApi
     {
-        public static string apiKey = "yourapikey";
-        public static string baseUri = "yoururl";
+        public static string apiKey = "";
+        public static string baseUri = "https://ussouthcentral.services.azureml.net/workspaces/39eb5872613d4ccc958e059087f2ddc2/services/605936757fbe4ce4ae37eb8c799b2b74/execute?api-version=2.0&details=true";
         public static Dictionary<string, string> CreditRiskDictionary = new Dictionary<string, string>() { { "1", "Good Credit" }, { "2", "Bad Credit" } };
         public static void GetMultiplePrediction(int numberOfPredictions)
         {
-            var csv = new CsvReader(File.OpenText(@".\data\german.data.csv"));                
+            var csv = new CsvReader(File.OpenText(@".\data\german.input.csv"));                
             var recordCount = 0;
+            csv.Read();
             while (csv.Read() && recordCount < numberOfPredictions)
             {
                 var answers = new List<string>();
